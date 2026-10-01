@@ -25,29 +25,34 @@ Currently known working devices include the ESP32 (Dev Module V1), the ESP32-CAM
 
 ## Battery & Power Optimization Guide
 
-The firmware has been optimized with two power strategies configured at the top of [`main.c`](main/main.c):
+The firmware includes a built-in **Double-Tap Reset Switcher** that lets you change power modes directly on the ESP32-CAM using the onboard **RST button**:
 
-### 1. Power Modes (`POWER_SAVE_MODE`)
-- **Mode 0: Continuous Low Power (`POWER_SAVE_MODE 0`)** *(Default)*:
+### 🔘 How to Switch Modes (Double-Tap Reset)
+1. **Double-click the physical RST button** on the back of the ESP32-CAM within **2.5 seconds**.
+2. The onboard **Red LED (GPIO 33)** on the back of the ESP32-CAM will blink to indicate the new mode:
+   - **1 Long Blink**: **Mode 0 (Continuous Low Power)** — *3 to 6+ weeks battery life*
+   - **2 Fast Blinks**: **Mode 1 (Deep Sleep Burst)** — *3 to 6+ months battery life*
+3. The selected mode is **saved to flash memory (NVS)**, so the board remembers it even when disconnected from power or battery!
+
+### 📊 Power Mode Comparison
+- **Mode 0: Continuous Low Power** *(Default)*:
   - Broadcasts every **2.0 seconds** (`ADV_INTERVAL_UNITS = 3200`).
-  - Enables modem sleep between intervals.
-  - Radio transmit power set to balanced **+3 dBm** (`ESP_PWR_LVL_P3`), preventing high current spikes.
-  - **Estimated battery life on 3200 mAh**: **3 to 6+ weeks** (vs ~24 hours unoptimized).
-  - Recommended for items where you want immediate real-time detection by passing Android devices.
+  - Radio modem sleep enabled between intervals; transmit power set to balanced **+3 dBm** (`ESP_PWR_LVL_P3`).
+  - **Estimated battery life on 3200 mAh**: **3 to 6+ weeks**.
+  - Best for everyday tracking (keys, backpack) so passing Android phones detect it immediately.
 
-- **Mode 1: Deep Sleep Burst (`POWER_SAVE_MODE 1`)**:
-  - Broadcasts for a short burst (e.g. 5 seconds), then puts the chip into deep sleep for 30–60 seconds.
-  - Drops current during sleep to micro-amps.
-  - **Estimated battery life on 3200 mAh**: **Several months**!
-  - Recommended for stationary items or luggage where 1-minute updates are sufficient.
+- **Mode 1: Deep Sleep Burst**:
+  - Broadcasts for **5 seconds**, then enters ultra-low-power deep sleep for **30 seconds**.
+  - **Estimated battery life on 3200 mAh**: **3 to 6+ months**.
+  - Best for luggage, vehicles, or stationary items.
 
-### 2. Tunable Parameters in [`main.c`](main/main.c)
+### ⚙️ Customizable Settings in [`main.c`](main/main.c)
 ```c
 #define ADV_INTERVAL_UNITS       3200   // 3200 * 0.625ms = 2.0s advertising interval
 #define BLE_TX_POWER_DEFAULT     ESP_PWR_LVL_P3 // +3 dBm balanced power
-#define POWER_SAVE_MODE          0      // 0 = Continuous low power, 1 = Deep sleep burst
 #define BURST_ACTIVE_TIME_SEC    5      // Active broadcast duration in seconds (for Mode 1)
 #define DEEP_SLEEP_DURATION_SEC  30     // Deep sleep interval in seconds (for Mode 1)
+#define STATUS_LED_PIN           33     // Onboard red LED on ESP32-CAM
 ```
 
 ## Known Issues
