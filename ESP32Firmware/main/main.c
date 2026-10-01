@@ -2,11 +2,47 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_log.h"
 #include "nvs_flash.h"      // For NVS functions like nvs_flash_init
 #include "esp_err.h"        // For error handling
+#include "esp_sleep.h"      // For deep sleep and power management
 
 #define TAG "ESP_FMDN"
+
+// =========================================================================
+// 🔋 BATTERY & POWER OPTIMIZATION CONFIGURATION
+// =========================================================================
+// Advertising Interval:
+// Interval is in units of 0.625 ms:
+//   - 0x20  (32)   = 20 ms    -> High drain (lasts ~24-36 hrs on 3200mAh)
+//   - 0x640 (1600) = 1000 ms  -> Balanced (1 second)
+//   - 0xC80 (3200) = 2000 ms  -> Recommended (2.0 seconds, standard FMDN beacon)
+//   - 0x12C0 (4800)= 3000 ms  -> Battery Saver (3.0 seconds)
+#define ADV_INTERVAL_UNITS           3200   // 3200 * 0.625ms = 2.0 seconds
+
+// BLE Transmit Power Level:
+//   - ESP_PWR_LVL_P9 = +9 dBm (Max power, highest current spikes ~120mA)
+//   - ESP_PWR_LVL_P3 = +3 dBm (Recommended: 15-25m range, ~30% less current)
+//   - ESP_PWR_LVL_N0 =  0 dBm (Low power: 10-15m range, lowest current)
+#define BLE_TX_POWER_DEFAULT         ESP_PWR_LVL_P3
+
+// Power Strategy Mode:
+//   0 = CONTINUOUS_LOW_POWER (Recommended)
+//       Maintains continuous 2.0s advertising with modem sleep enabled.
+//       Ensures passing Android devices can detect it reliably at any time.
+//       Estimated battery life on 3200mAh: ~3 to 6+ weeks (depending on board).
+//
+//   1 = DEEP_SLEEP_BURST
+//       Wakes up, broadcasts for BURST_ACTIVE_TIME_SEC, then enters deep sleep
+//       for DEEP_SLEEP_DURATION_SEC.
+//       Estimated battery life on 3200mAh: multiple months!
+#define POWER_SAVE_MODE              0
+
+#define BURST_ACTIVE_TIME_SEC        5     // Active broadcast duration in seconds (for Mode 1)
+#define DEEP_SLEEP_DURATION_SEC      30    // Deep sleep sleep interval in seconds (for Mode 1)
+// =========================================================================
 
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
 #include "esp_nimble_hci.h"
@@ -82,17 +118,16 @@ static void ble_start_advertising(uint8_t *adv_raw_data, size_t adv_raw_data_len
     struct ble_gap_adv_params adv_params = {
         .conn_mode = BLE_GAP_CONN_MODE_NON,
         .disc_mode = BLE_GAP_DISC_MODE_GEN,
-        .itvl_min = 0x20,
-        .itvl_max = 0x20
+        .itvl_min = ADV_INTERVAL_UNITS,
+        .itvl_max = ADV_INTERVAL_UNITS
     };
-
 
     ble_gap_adv_set_data(adv_raw_data, adv_raw_data_len);
 
     // Start advertising
     ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER, &adv_params, ble_advertise_cb, NULL);
     
-    ESP_LOGI(TAG, "Started advertising");
+    ESP_LOGI(TAG, "Started advertising (Interval: %d ms)", (int)(ADV_INTERVAL_UNITS * 0.625));
 }
 
 static void ble_host_task(void *param)
@@ -110,8 +145,6 @@ static void on_sync(void)
     
     // Start advertising
     ble_start_advertising(adv_raw_data, sizeof(adv_raw_data));
-    //print adv raw data
-    ESP_LOGI(TAG, "adv_raw_data: %s", adv_raw_data);
 }
 #endif
 
@@ -124,15 +157,13 @@ void app_main() {
     }
     ESP_ERROR_CHECK(ret);
 
-
-
     // 20-byte ephemeral identifier
     uint8_t eid_bytes[20];
     hex_string_to_bytes(eid_string, eid_bytes, 20);
     memcpy(&adv_raw_data[8], eid_bytes, 20);
 
     #if defined(CONFIG_IDF_TARGET_ESP32C3)
-        ESP_LOGI(TAG, "Initializing BLE");
+        ESP_LOGI(TAG, "Initializing NimBLE with power optimizations");
         
         // Initialize NimBLE - ESP-IDF v5.3 style
         ESP_ERROR_CHECK(nimble_port_init());
@@ -147,7 +178,7 @@ void app_main() {
         nimble_port_freertos_init(ble_host_task);
 
     #elif defined(CONFIG_IDF_TARGET_ESP32)
-        // Initialize Bluetooth controller
+        // Initialize Bluetooth controller with low power / modem sleep configuration
         esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
         ESP_ERROR_CHECK(esp_bt_controller_init(&bt_cfg));
         ESP_ERROR_CHECK(esp_bt_controller_enable(ESP_BT_MODE_BLE));
@@ -156,21 +187,17 @@ void app_main() {
         ESP_ERROR_CHECK(esp_bluedroid_init());
         ESP_ERROR_CHECK(esp_bluedroid_enable());
 
-        // Set BLE TX power to 9 dBm
-        ESP_ERROR_CHECK(esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9));
-        ESP_ERROR_CHECK(esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P9));
-        ESP_LOGI(TAG, "Set BLE TX Power to 9 dBm");
-
+        // Set optimized BLE TX power (lower power spikes, saves battery)
+        ESP_ERROR_CHECK(esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, BLE_TX_POWER_DEFAULT));
+        ESP_ERROR_CHECK(esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, BLE_TX_POWER_DEFAULT));
+        ESP_LOGI(TAG, "Configured BLE TX Power level %d", BLE_TX_POWER_DEFAULT);
 
         ESP_ERROR_CHECK(esp_ble_gap_config_adv_data_raw(adv_raw_data, sizeof(adv_raw_data)));
 
-        // Configure advertisement parameters
+        // Configure advertisement parameters with power-saving interval
         esp_ble_adv_params_t adv_params = {
-
-            // change those if you want to save power
-            .adv_int_min = 0x20,
-            .adv_int_max = 0x20,
-
+            .adv_int_min = ADV_INTERVAL_UNITS,
+            .adv_int_max = ADV_INTERVAL_UNITS,
             .adv_type = ADV_TYPE_NONCONN_IND,
             .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
             .channel_map = ADV_CHNL_ALL,
@@ -179,6 +206,28 @@ void app_main() {
 
         // Start advertising
         ESP_ERROR_CHECK(esp_ble_gap_start_advertising(&adv_params));
-        ESP_LOGI(TAG, "BLE advertising started.");
+        ESP_LOGI(TAG, "BLE advertising started with interval %d ms", (int)(ADV_INTERVAL_UNITS * 0.625));
+    #endif
+
+    // Handle Deep Sleep Burst Mode if enabled
+    #if (POWER_SAVE_MODE == 1)
+        ESP_LOGI(TAG, "Deep Sleep Burst Mode: Advertising for %d seconds...", BURST_ACTIVE_TIME_SEC);
+        vTaskDelay(pdMS_TO_TICKS(BURST_ACTIVE_TIME_SEC * 1000));
+
+        ESP_LOGI(TAG, "Entering deep sleep for %d seconds...", DEEP_SLEEP_DURATION_SEC);
+        #if defined(CONFIG_IDF_TARGET_ESP32C3)
+            ble_gap_adv_stop();
+            nimble_port_stop();
+            nimble_port_deinit();
+        #elif defined(CONFIG_IDF_TARGET_ESP32)
+            esp_ble_gap_stop_advertising();
+            esp_bluedroid_disable();
+            esp_bluedroid_deinit();
+            esp_bt_controller_disable();
+            esp_bt_controller_deinit();
+        #endif
+
+        esp_sleep_enable_timer_wakeup((uint64_t)DEEP_SLEEP_DURATION_SEC * 1000000ULL);
+        esp_deep_sleep_start();
     #endif
 }

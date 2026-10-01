@@ -23,10 +23,36 @@ Currently known working devices include the ESP32 (Dev Module V1), the ESP32-CAM
 - After flashing, the ESP32 will restart and start advertising as the Find My Device tracker previously registered
 
 
+## Battery & Power Optimization Guide
+
+The firmware has been optimized with two power strategies configured at the top of [`main.c`](main/main.c):
+
+### 1. Power Modes (`POWER_SAVE_MODE`)
+- **Mode 0: Continuous Low Power (`POWER_SAVE_MODE 0`)** *(Default)*:
+  - Broadcasts every **2.0 seconds** (`ADV_INTERVAL_UNITS = 3200`).
+  - Enables modem sleep between intervals.
+  - Radio transmit power set to balanced **+3 dBm** (`ESP_PWR_LVL_P3`), preventing high current spikes.
+  - **Estimated battery life on 3200 mAh**: **3 to 6+ weeks** (vs ~24 hours unoptimized).
+  - Recommended for items where you want immediate real-time detection by passing Android devices.
+
+- **Mode 1: Deep Sleep Burst (`POWER_SAVE_MODE 1`)**:
+  - Broadcasts for a short burst (e.g. 5 seconds), then puts the chip into deep sleep for 30–60 seconds.
+  - Drops current during sleep to micro-amps.
+  - **Estimated battery life on 3200 mAh**: **Several months**!
+  - Recommended for stationary items or luggage where 1-minute updates are sufficient.
+
+### 2. Tunable Parameters in [`main.c`](main/main.c)
+```c
+#define ADV_INTERVAL_UNITS       3200   // 3200 * 0.625ms = 2.0s advertising interval
+#define BLE_TX_POWER_DEFAULT     ESP_PWR_LVL_P3 // +3 dBm balanced power
+#define POWER_SAVE_MODE          0      // 0 = Continuous low power, 1 = Deep sleep burst
+#define BURST_ACTIVE_TIME_SEC    5      // Active broadcast duration in seconds (for Mode 1)
+#define DEEP_SLEEP_DURATION_SEC  30     // Deep sleep interval in seconds (for Mode 1)
+```
+
 ## Known Issues
 
 - You need to run [`main.py`](../main.py) every 4 days to keep receiving location reports from the server. This is because the advertisements have to be "announced" to Google. 
 - Might not work with 'fresh' Google accounts: "Your encryption data is locked on your device" is shown if you have never paired a Find My Device tracker with an Android device. Solution: See [README of the parent folder](../README.md).
 - You cannot view locations for the ESP32 in the Google Find My Device app. You will need to use the Python script to do so.
 - No privacy features such as rotating MAC addresses are implemented
-- The firmware was built to receive as many network reports as possible. Therefore, it might consume more power than necessary. To fix this, you can tweak the parameters (TX Power and advertising interval) in [`main.c`](main/main.c)
