@@ -20,8 +20,8 @@
 
 // Advertising Interval:
 // In units of 0.625 ms:
-//   3200 * 0.625ms = 2000 ms (2.0 seconds, standard Google FMDN beacon)
-#define ADV_INTERVAL_UNITS           3200
+//   1600 * 0.625ms = 1000 ms (1.0 second: fast Radar Arrow updates + ~3-4 weeks battery life)
+#define ADV_INTERVAL_UNITS           1600
 
 // BLE Transmit Power:
 //   ESP_PWR_LVL_P3 (+3 dBm) gives 15-25m range with ~30% lower current spikes.

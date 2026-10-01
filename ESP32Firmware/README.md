@@ -36,10 +36,10 @@ The firmware includes a built-in **Double-Tap Reset Switcher** that lets you cha
 
 ### 📊 Power Mode Comparison
 - **Mode 0: Continuous Low Power** *(Default)*:
-  - Broadcasts every **2.0 seconds** (`ADV_INTERVAL_UNITS = 3200`).
-  - Radio modem sleep enabled between intervals; transmit power set to balanced **+3 dBm** (`ESP_PWR_LVL_P3`).
-  - **Estimated battery life on 3200 mAh**: **3 to 6+ weeks**.
-  - Best for everyday tracking (keys, backpack) so passing Android phones detect it immediately.
+  - Broadcasts every **1.0 second** (`ADV_INTERVAL_UNITS = 1600`).
+  - Optimized for **Fast Radar Arrow Pinpointing** in the FindMyTracker app while keeping radio modem sleep enabled.
+  - **Estimated battery life on 3200 mAh**: **~3 to 4 weeks** (vs ~24 hours unoptimized).
+  - Best for everyday tracking so passing phones detect it immediately and the arrow responds quickly during search.
 
 - **Mode 1: Deep Sleep Burst**:
   - Broadcasts for **5 seconds**, then enters ultra-low-power deep sleep for **30 seconds**.
@@ -48,7 +48,7 @@ The firmware includes a built-in **Double-Tap Reset Switcher** that lets you cha
 
 ### ⚙️ Customizable Settings in [`main.c`](main/main.c)
 ```c
-#define ADV_INTERVAL_UNITS       3200   // 3200 * 0.625ms = 2.0s advertising interval
+#define ADV_INTERVAL_UNITS       1600   // 1600 * 0.625ms = 1.0s interval (fast Radar Arrow updates)
 #define BLE_TX_POWER_DEFAULT     ESP_PWR_LVL_P3 // +3 dBm balanced power
 #define BURST_ACTIVE_TIME_SEC    5      // Active broadcast duration in seconds (for Mode 1)
 #define DEEP_SLEEP_DURATION_SEC  30     // Deep sleep interval in seconds (for Mode 1)
